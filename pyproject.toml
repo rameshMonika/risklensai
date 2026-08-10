@@ -1,0 +1,32 @@
+[project]
+name = "risklensaidev"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "rameshMonika", email = "87105893+rameshMonika@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+risklensaidev = "risklensaidev:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+native-tls = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
