@@ -14,6 +14,11 @@ dependencies = [
     "pandas>=3.0.5",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-groq>=0.2.0",
+    "tavily-python>=0.5.0",
+    "truststore>=0.9.0",
 ]
 
 [project.scripts]
