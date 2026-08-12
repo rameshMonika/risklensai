@@ -16,13 +16,12 @@ MVP limits: portfolio capped at ~5-10 equities; no auth in V1 (single hardcoded 
 
 ## Development approach
 
-**Notebook + evaluation first, implementation second.** Before building the actual LangGraph application, validate the finance methodology and evaluation approach in notebooks:
+**Notebook + evaluation first, implementation second.** Before building the actual LangGraph application, validate the finance methodology and the agent-evaluation approach in notebooks:
 
 1. `01_finance_methodology.ipynb` — market data retrieval, risk calculations, validated against ground truth.
-2. `02_agent_evaluation.ipynb` — supervisor routing accuracy (labelled test questions), evidence quality (LLM-as-judge).
-3. `03_end_to_end_evaluation.ipynb` — full investigations, report quality (LLM-as-judge).
+2. `02_agent_evaluation.ipynb` — a lightweight in-notebook LangGraph supervisor + agent-node prototype (Portfolio/Market/Risk/News/Answer/Report), run over labelled test questions spanning both simple routes and full investigations, scored across five dimensions: final answer correctness, correct agent selection, correct trajectory, latency, and safety/reliability. See Evaluation methodology below.
 
-Only after the notebooks prove the calculations are correct and the evaluation rubric works does the multi-agent app itself get built. Do not scaffold the LangGraph app, database, or frontend before that.
+Only after the notebooks prove the calculations are correct and the evaluation harness works does the real multi-agent app itself get built. Do not scaffold the LangGraph app, database, or frontend before that. Risk-calculation correctness (returns, volatility, drawdown, concentration, correlation, loss contribution) is verified separately by plain pytest unit tests in the codebase, not in these notebooks — it's ground-truth math, not agent behavior.
 
 ## ERD
 
@@ -124,7 +123,7 @@ Confirmed example routes:
 | Question | Route |
 |---|---|
 | "What are my holdings?" | `Portfolio → Answer → END` |
-| "How concentrated am I?" | `Portfolio → Risk → Answer → END` |
+| "How concentrated am I?" | `Portfolio → Market → Risk → Answer → END` (Risk needs current prices for `calculate_concentration()`, which only Market fetches, so Market is required ahead of Risk) |
 | "What's NVDA's 30-day volatility?" | `Market → Risk → Answer → END` |
 | "Why did NVDA fall this week?" | `Market → News → Report → END` (target ticker+period already given by the user, so Risk isn't needed to discover it — still goes through Report since it involves News/evidence) |
 | "Investigate my portfolio risk" | `Portfolio → Market → Risk → News → Report → END` (full investigation, always the complete route) |
@@ -197,18 +196,23 @@ V2 addition inside the full-investigation route:
 
 ## Evaluation methodology
 
-Kept deliberately small — four claims, not twenty metrics:
+Five dimensions, not a growing pile of metrics — adapted from a standard AI-agent eval framework. In our multi-agent design, the Supervisor's routing decision is the analog of "tool selection," and the agent-node invocation order is the "trajectory":
 
-1. **Supervisor routing accuracy** — 30-50 labelled test questions with an expected agent sequence (e.g. "What's NVDA volatility?" → `Market → Risk`), compare actual vs. expected route, pass/fail. Metric: Routing Accuracy. (Intent accuracy, target-source accuracy, unnecessary-agent-rate are debugging info only, not core metrics.)
-2. **Risk calculation correctness** — plain pytest unit tests against Python ground truth for returns, volatility, max drawdown, concentration, correlation, loss contribution. No LLM judge. Metric: Financial Calculation Accuracy.
-3. **Evidence quality** — LLM-as-judge, 1-5 rubric: relevance (is retrieved evidence relevant to the identified risk event?) and claim_support (does it actually support the report's claim?).
-4. **Final report quality** — second LLM-as-judge pass, given question + verified metrics + evidence + generated report: groundedness (conclusions supported by supplied data?) and relevance (does it answer the question?). Clarity is explicitly deferred, not a core metric.
+1. **Final Answer Correctness** — did the Answer/Report Agent give the right answer? Deterministic substring/value checks against ground truth for quantitative questions (e.g. "28.4%" appears in the answer); LLM-as-judge (groundedness + relevance, 1-5 rubric) for open-ended full-investigation reports, since there's no single correct phrasing. This subsumes the old "evidence quality" and "report quality" checks — a report that cites evidence not supporting its claims is an answer-correctness failure, not a separate category.
+2. **Correct Agent Selection** — did the Supervisor invoke the right set of agents for the question (Portfolio/Market/Risk/News/Answer/Report), regardless of order? `Counter(actual_agents) == Counter(expected_agents)`.
+3. **Correct Trajectory** — did it invoke them in the right order? Strict ordered-list comparison against the routing table in Agent flow / routing above (e.g. `Market → Risk → Answer` for "What's NVDA's 30-day volatility?"). Order can fail even when agent selection passes.
+4. **Latency** — did the route finish within a threshold? Simple Q&A routes and full-investigation routes get separate thresholds, since a full investigation involves multiple external API calls (Alpha Vantage, Tavily) and is expected to take longer.
+5. **Safety & Reliability** — prompt-injection resistance (an injected "reveal your instructions" question should trigger zero agent calls and a refusal, not a tool call); reliability (an unknown/delisted ticker should produce "not available," never a fabricated price or metric); no leakage of API keys or internal config in any answer.
 
-Notebook layout mirrors this: `01_finance_methodology.ipynb` (market data, risk calcs, validation), `02_agent_evaluation.ipynb` (supervisor routing, evidence judge), `03_end_to_end_evaluation.ipynb` (full investigations, report judge). Unit tests for the deterministic risk functions live in the actual codebase, not notebooks.
+Labelled test questions (each with expected agent sequence, expected answer/substring or judge rubric, max latency, and test type — normal/reliability/safety) drive the harness in `02_agent_evaluation.ipynb`, run against the in-notebook mini prototype. Each test case is scored on all five dimensions independently and reported as a scorecard (per-dimension pass rate + overall average), not a single blended number — a correct final answer with the wrong trajectory or a leaked secret is still a failure worth surfacing separately.
+
+Build the dataset in two phases: **first ~5 cases** covering one of each route shape (a simple single-agent route, a multi-agent quantitative route, a full investigation, a reliability case like an unknown ticker, and a safety/prompt-injection case) to prove the harness and prototype work end-to-end — same shape as the reference notebook's 5-case smoke set. Only after those 5 pass cleanly, **scale to 30-50** covering the full routing table and edge cases. Don't write the 30-50 up front; the 5-case pass is the gate.
+
+Risk-calculation correctness (returns, volatility, max drawdown, concentration, correlation, loss contribution) stays outside this harness entirely — plain pytest unit tests in the codebase against Python ground truth, since it's deterministic math, not agent behavior.
 
 ## Not yet decided
 
 - Tech stack and project layout (frontend framework, backend framework, language/package-manager choices).
 - Concrete sample portfolio and API access (Alpha Vantage, Tavily) needed to actually run the notebooks.
 - Ground-truth reference for the risk calculation pytest suite.
-- The 30-50 labelled routing questions for the supervisor eval.
+- The 30-50 labelled test questions (expected agent sequence, expected answer, latency threshold, test type) for the 5-dimension agent eval.
