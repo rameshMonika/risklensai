@@ -19,7 +19,7 @@ MVP limits: portfolio capped at ~5-10 equities; no auth in V1 (single hardcoded 
 **Notebook + evaluation first, implementation second.** Before building the actual LangGraph application, validate the finance methodology and the agent-evaluation approach in notebooks:
 
 1. `01_finance_methodology.ipynb` — market data retrieval, risk calculations, validated against ground truth.
-2. `02_agent_evaluation.ipynb` — a lightweight in-notebook LangGraph supervisor + agent-node prototype (Portfolio/Market/Risk/News/Answer/Report), run over labelled test questions spanning both simple routes and full investigations, scored across five dimensions: final answer correctness, correct agent selection, correct trajectory, latency, and safety/reliability. See Evaluation methodology below.
+2. `02_agent_evaluation.ipynb` — a lightweight in-notebook LangGraph supervisor + agent-node prototype (Portfolio/Market/Risk/News/Answer/Report), run over labelled test questions spanning both simple routes and full investigations, scored across five dimensions: final answer correctness, correct agent selection, correct trajectory, latency, and safety/reliability. See Evaluation methodology below. This original notebook (LLM-prompt Supervisor) is left untouched as the historical baseline; `02_agent_evaluation_v2.ipynb` holds the fix iterations and the semantic-router experiment that superseded it, and `02_agent_evaluation_v3.ipynb` is the clean current version — see Supervisor routing methodology under Agent flow / routing below for the outcome.
 
 Only after the notebooks prove the calculations are correct and the evaluation harness works does the real multi-agent app itself get built. Do not scaffold the LangGraph app, database, or frontend before that. Risk-calculation correctness (returns, volatility, drawdown, concentration, correlation, loss contribution) is verified separately by plain pytest unit tests in the codebase, not in these notebooks — it's ground-truth math, not agent behavior.
 
@@ -100,6 +100,16 @@ Design notes:
 ## Agent flow / routing (V1)
 
 One Supervisor, no second supervisor/meta-router — kept deliberately simple for V1. The Supervisor classifies intent, extracts target ticker + period, and **selects both which agents run and the edge order between them** per query (not just which nodes to include from one fixed graph).
+
+### Supervisor routing methodology: decided — embedding-based semantic intent routing
+
+The LLM-prompt-based structured-output classification originally assumed for V1 has been replaced. Head-to-head evaluation in `02_agent_evaluation_v2.ipynb` (iteration history) and `02_agent_evaluation_v3.ipynb` (clean final version) showed the LLM-prompt Supervisor scoring 88.5% overall on the 33-case Phase 2 suite (87.9% Answer Correct, 90.9% Agent Correct, 90.9% Trajectory Correct, 78.8% Latency Pass, 93.9% Safe/Reliable), against the semantic router's 99.4% overall (100% / 100% / 100% / 97.0% / 100% across the same five dimensions) — a decisive win on every dimension, not just the average.
+
+The adopted architecture:
+- A small local encoder (`HuggingFaceEncoder`, no API key) embeds each question; per-intent KMeans cluster centroids (a handful of representative vectors per intent, not every raw example) represent each business intent (holdings, concentration, symbol_risk, news_reason, full_investigation); a calibrated per-intent score threshold (tuned by coordinate ascent against a labelled calibration set, weighted to penalize false-negative refusals more than ordinary intent mix-ups) decides the winner, or refuses if nothing clears its bar.
+- A **separate, dedicated safety guardrail** (a small fast Groq LLM call, structured-output classification) runs *ahead of* the intent router and blocks the pipeline entirely — in blocking mode, so no agent executes — on prompt-injection attempts. This was a necessary addition: the embedding router alone could not reliably separate crafted injection phrasings from real intents no matter how the calibration set was tuned, since general-purpose sentence embeddings give even unrelated text a mildly positive similarity floor against every intent. Off-topic-but-benign questions (weather, jokes) are still handled by the intent router's own refusal path, not the guardrail.
+
+This decision resolves the "Not yet decided" item that used to track this; no hybrid was needed.
 
 ```
                          USER
@@ -216,4 +226,3 @@ Risk-calculation correctness (returns, volatility, max drawdown, concentration, 
 - Concrete sample portfolio and API access (Alpha Vantage, Tavily) needed to actually run the notebooks.
 - Ground-truth reference for the risk calculation pytest suite.
 - The 30-50 labelled test questions (expected agent sequence, expected answer, latency threshold, test type) for the 5-dimension agent eval.
-- Supervisor routing methodology. V1's working assumption is LLM-prompt-based structured-output classification (see Agent flow / routing below), but the Phase 2 run in `02_agent_evaluation.ipynb` showed 3 misroutes out of 33 cases, all paraphrases of already-covered intents that the prompt's literal example phrasings didn't generalize to. An alternative — embedding-based semantic intent routing (`semantic-router` package + `HuggingFaceEncoder`, mapping classified intent to a deterministic agent trajectory) — is being evaluated head-to-head against that LLM-router baseline in `02_agent_evaluation_v2.ipynb`. Not yet decided whether to keep the LLM router, adopt semantic routing, or build a hybrid of the two; pending the accuracy/confidence/latency comparison.
