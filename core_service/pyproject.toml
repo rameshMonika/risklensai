@@ -1,0 +1,26 @@
+[project]
+name = "core-service"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "rameshMonika", email = "87105893+rameshMonika@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "bcrypt>=5.0.0",
+    "fastapi>=0.141.1",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.15.0",
+    "pydantic[email]>=2.13.4",
+    "pyjwt>=2.13.0",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.52.3",
+]
+
+[project.scripts]
+core-service = "core_service:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
