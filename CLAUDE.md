@@ -12,7 +12,9 @@ Design and evaluate an agentic system capable of dynamically investigating portf
 
 Out of scope: automated trading, buy/sell execution, portfolio optimization, price prediction, options pricing, tax calculations, crypto, brokerage integration, personalized investment recommendations.
 
-MVP limits: portfolio capped at ~5-10 equities; no auth in V1 (single hardcoded user); no cash balance tracked (portfolio value = Σ holding market values only); margin, lot-level cost basis, and dividend persistence all deferred (dividends fetched live, not stored); dashboard and AI investigation workspace merged into one screen.
+MVP limits: portfolio capped at ~5-10 equities; no cash balance tracked (portfolio value = Σ holding market values only); margin, lot-level cost basis, and dividend persistence all deferred (dividends fetched live, not stored); dashboard and AI investigation workspace merged into one screen.
+
+**Auth is in scope for V1** (revised from an earlier no-auth assumption): email/password with bcrypt-hashed passwords and short-lived stateless JWT access tokens. `USER.password_hash` exists in the ERD for this reason. JWTs are validated by signature (shared secret) wherever they're checked, not by a network call back to the auth service — see Backend architecture below.
 
 ## Development approach
 
@@ -30,6 +32,7 @@ USER
   id PK
   name
   email
+  password_hash
   created_at
 
 PORTFOLIO
@@ -77,7 +80,7 @@ INVESTIGATION_REPORT
 ```
 
 Design notes:
-- No `risk_tolerance` / `investment_horizon` / `preferred_currency` / `password_hash` on `USER` — deliberately dropped to keep this a non-personalization, non-recommendation system.
+- No `risk_tolerance` / `investment_horizon` / `preferred_currency` on `USER` — deliberately dropped to keep this a non-personalization, non-recommendation system. `password_hash` *is* present (see MVP limits above: auth is in scope for V1), which doesn't conflict with that reasoning — authentication isn't personalization.
 - No `cash_balance` on `PORTFOLIO` — valuation is Σ holding market values only.
 - No sector/industry/asset-class columns on `HOLDING` and no separate `SECURITIES` master table. Sector/company metadata source of truth is the Market Agent (live market-data lookup); cache in Postgres later only if repeated calls become wasteful.
 - No `RISK_RESULT` relational table. Forcing scalar per-symbol metrics (volatility, drawdown) and pairwise metrics (correlation matrix) into one relational schema wasn't worth it — risk calculations stay structured in-memory during the agent workflow and persist as `INVESTIGATION.risk_results` JSONB instead.
@@ -88,9 +91,24 @@ Design notes:
 - No `relevance` column on `EVIDENCE` in V1 — there's no defined runtime step where the News Agent ranks/filters candidate articles, so a persisted relevance score would conflate an eval-time judge score (computed separately, not application data) with an application ranking that doesn't exist yet. If real-time News ranking gets added later, define it explicitly first.
 - No `risk_level` on `INVESTIGATION_REPORT` — an LLM-assigned "Low/Medium/High" label has no defined methodology behind it and would be an unaudited classification sitting next to rigorously-computed metrics. The report states the actual computed numbers (e.g. "volatility rose from X to Y, tech exposure is Z%") instead of inventing a categorical label.
 
+## Backend architecture (V1)
+
+Two separate FastAPI services, not one monolith, with a strict service boundary — the frontend only ever talks to one of them:
+
+- **Core service** (Auth/Portfolio) — registration, login, JWT issuance, FR1 (portfolio/holdings CRUD), and **all persistence**: owns `USER`, `PORTFOLIO`, `HOLDING`, and also `INVESTIGATION`, `EVIDENCE`, `INVESTIGATION_REPORT`. This is the only public-facing API; the frontend never calls the Agent service directly.
+- **Agent service** — the LangGraph investigation pipeline (guardrail → semantic router → Portfolio/Market/Risk/News/Answer/Report agents). **Fully stateless, no database access of any kind.** Not reachable from outside the private network/service mesh — only Core calls it.
+
+Request flow for an investigation: `React → Core: POST /investigations {portfolio_id, question} → Core authenticates the user, verifies portfolio ownership, loads holdings from Postgres → Core calls Agent: POST /internal/investigate {portfolio_id, question, holdings} → Agent runs the LangGraph pipeline statelessly and returns the report → Core persists INVESTIGATION/EVIDENCE/INVESTIGATION_REPORT → Core returns the result to React.` The Agent service never touches Postgres, never sees a user JWT, and never knows how portfolios are stored — it only receives a holdings snapshot in the request body and returns a result. This makes the earlier "Portfolio Agent reads Postgres directly" design point obsolete — see its updated note below.
+
+The internal `POST /internal/investigate` endpoint is protected by a **service-to-service shared secret** (an `INTERNAL_SERVICE_API_KEY` header Core sends and Agent validates), not a user JWT and not database credentials — a JWT would leak end-user identity into a service that has no user table to check it against, and without *some* credential here anyone who finds the endpoint could call it directly and burn the Groq/Alpha Vantage/Tavily quota, bypassing Core's auth entirely.
+
+The semantic router's calibration (KMeans cluster centroids + per-intent thresholds, see Agent flow / routing below) is a build-time artifact, not something computed at request time or even at server startup — `scripts/calibrate_router.py` in the Agent service is run manually (or in CI) whenever the calibration data changes, and its output is a committed JSON file the service loads directly on boot.
+
+Market, Risk, and News are real MCP servers (separate processes, stdio transport, one consumer) — this was originally an aspirational note in the Agents section below; it's now the actual plan, not just documentation language.
+
 ## Agents (V1)
 
-- **Portfolio Agent** — reads Postgres directly (no MCP wrapper; internal/simple, not worth the infra overhead).
+- **Portfolio Agent** — does not query Postgres at all (the Agent service has no database access — see Backend architecture above). Reads the holdings snapshot already present in `state["holdings"]`, populated from the incoming request payload Core sent. Effectively a state-shaping step rather than a data-fetching one now.
 - **Market Agent** — Alpha Vantage MCP. Retrieves raw historical prices, current/latest prices, trading volume, company info, and sector/industry metadata. Does NOT compute returns (that's `calculate_returns()`, owned by Risk Agent — Market Agent returning derived returns would duplicate/conflict with the deterministic-calculation rule) and does NOT retrieve benchmark prices in V1 (dead scope now that beta/benchmark comparison is deferred past V1).
 - **Risk Agent** — local deterministic-calculation MCP (was called "Analytics Agent" in early drafts).
 - **News Agent** — Tavily MCP. Always given a specific symbol + date-range target (from either the user's question or the Risk Agent's output) — never a blind search across all holdings.
