@@ -1,4 +1,4 @@
-import { ApiError, Holding, LoginPayload, RegisterPayload, TokenResponse, User } from "./types";
+import { ApiError, Holding, InvestigationResult, LoginPayload, RegisterPayload, TokenResponse, User } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -123,3 +123,11 @@ export function removeHolding(id: number): Promise<void> {
     method: "DELETE",
   });
 }
+
+export function investigate(question: string): Promise<InvestigationResult> {
+  return authRequest<InvestigationResult>("/investigations", {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}
+

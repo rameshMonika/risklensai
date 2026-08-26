@@ -293,7 +293,67 @@ body {
 
 .investigation-answer {
   font-size: 1rem;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.investigation-answer h1,
+.investigation-answer h2,
+.investigation-answer h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.investigation-answer h1:first-child,
+.investigation-answer h2:first-child,
+.investigation-answer h3:first-child {
+  margin-top: 0;
+}
+
+.investigation-answer p {
+  margin: 0.5rem 0;
+}
+
+.investigation-answer ul,
+.investigation-answer ol {
+  margin: 0.4rem 0;
+  padding-left: 1.25rem;
+}
+
+.investigation-answer li {
+  margin: 0.2rem 0;
+}
+
+.investigation-answer a {
+  color: #2563eb;
+}
+
+.investigation-answer strong {
+  font-weight: 600;
+}
+
+.investigation-answer hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 1rem 0;
+}
+
+.investigation-answer table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.9rem;
+}
+
+.investigation-answer th,
+.investigation-answer td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #eee;
+}
+
+.investigation-answer th {
+  font-weight: 600;
+  border-bottom: 2px solid #ddd;
 }
 
 .risk-results ul,

@@ -1,3 +1,5 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { InvestigationResult } from "../api/types";
 import { AgentTrace } from "./AgentTrace";
 
@@ -35,7 +37,9 @@ export function InvestigationReport({ result, loading, error }: InvestigationRep
       <h2>Result</h2>
       <AgentTrace trajectory={result.trajectory} />
 
-      <p className="investigation-answer">{result.answer}</p>
+      <div className="investigation-answer">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.answer}</ReactMarkdown>
+      </div>
 
       {hasRiskResults && (
         <div className="risk-results">
