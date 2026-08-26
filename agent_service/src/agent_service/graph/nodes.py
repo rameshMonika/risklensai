@@ -180,7 +180,9 @@ REPORT_SYSTEM_PROMPT = \
 
 Write a short grounded report with, in order:
 1. A quantitative risk summary based ONLY on the given risk_results.
-2. Cited news evidence (title + url) explaining what happened, if any evidence was given.
+2. A brief narrative of what the news evidence indicates happened, referencing article titles
+   by name (not raw URLs -- the UI already lists full citations with links in a separate
+   Evidence section shown below this report, so do not repeat URLs here).
 3. A brief interpretation connecting the numbers to the news. news_evidence only ever covers
    the single symbol Risk selected as the top loss driver: for every other holding mentioned
    in risk_results, state plainly that its cause was not examined rather than inferring one.

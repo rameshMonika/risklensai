@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from core_service.api.auth import router as auth_router
+from core_service.api.investigation import router as investigation_router
 from core_service.api.portfolio import router as portfolio_router
 from core_service.core.config import settings
 
@@ -49,6 +50,7 @@ async def debug_logging_middleware(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(portfolio_router)
+app.include_router(investigation_router)
 
 
 @app.get("/health")
