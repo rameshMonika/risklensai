@@ -1,6 +1,8 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import * as coreClient from "../api/coreClient";
 import { Holding } from "../api/types";
 import { Modal } from "./Modal";
+import { SymbolCombobox } from "./SymbolCombobox";
 
 interface HoldingsPanelProps {
   holdings: Holding[];
@@ -24,6 +26,41 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
   const [editingHolding, setEditingHolding] = useState<Holding | "new" | null>(null);
   const [form, setForm] = useState<HoldingFormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  // symbol -> current price. Absent (rather than 0) means "not fetched yet
+  // or unavailable" so the table can distinguish that from a real $0 price.
+  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
+  const [quotesLoading, setQuotesLoading] = useState(false);
+
+  useEffect(() => {
+    if (holdings.length === 0) return;
+
+    let cancelled = false;
+    const symbols = [...new Set(holdings.map((h) => h.symbol))];
+
+    setQuotesLoading(true);
+    coreClient
+      .getQuotes(symbols)
+      .then((quotes) => {
+        if (cancelled) return;
+        setCurrentPrices(Object.fromEntries(quotes.map((q) => [q.symbol, q.price])));
+      })
+      .catch((error) => {
+        // Fail visibly (console) rather than silently leaving prices blank
+        // with no indication anything went wrong.
+        console.error("Failed to load current prices:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setQuotesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // Re-fetch whenever the set of held symbols changes (add/remove/edit),
+    // not on every holdings re-render (quantity/avg_cost edits don't need a
+    // fresh quote).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdings.map((h) => h.symbol).join(",")]);
 
   function openAddModal() {
     setForm(EMPTY_FORM);
@@ -66,6 +103,16 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
     }
   }
 
+  // Only holdings whose current price actually came back -- so the total
+  // and its cost comparison are always apples-to-apples, never mixing a
+  // real quote for one symbol with a stale/missing one for another.
+  const pricedHoldings = holdings.filter((h) => currentPrices[h.symbol] !== undefined);
+  const totalCurrentValue = pricedHoldings.reduce((sum, h) => sum + h.quantity * currentPrices[h.symbol], 0);
+  const totalCostValue = pricedHoldings.reduce((sum, h) => sum + h.quantity * h.avg_cost, 0);
+  const totalDelta = totalCurrentValue - totalCostValue;
+  const totalDeltaPercent = totalCostValue > 0 ? (totalDelta / totalCostValue) * 100 : 0;
+  const isPartial = pricedHoldings.length > 0 && pricedHoldings.length < holdings.length;
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -74,6 +121,33 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
           + Add holding
         </button>
       </div>
+
+      {!loading && holdings.length > 0 && (
+        <div className="portfolio-summary">
+          <div className="portfolio-summary-value">
+            <span className="portfolio-summary-label">Total value</span>
+            <strong>
+              {pricedHoldings.length > 0
+                ? `$${totalCurrentValue.toFixed(2)}`
+                : quotesLoading
+                  ? "Calculating..."
+                  : "Unavailable"}
+            </strong>
+          </div>
+          {pricedHoldings.length > 0 && (
+            <div className={`portfolio-summary-delta ${totalDelta >= 0 ? "delta-positive" : "delta-negative"}`}>
+              {totalDelta >= 0 ? "▲" : "▼"} ${Math.abs(totalDelta).toFixed(2)} (
+              {totalDeltaPercent >= 0 ? "+" : ""}
+              {totalDeltaPercent.toFixed(2)}%) vs. cost
+            </div>
+          )}
+          {isPartial && (
+            <span className="portfolio-summary-note">
+              ({pricedHoldings.length} of {holdings.length} symbols priced)
+            </span>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <p>Loading holdings...</p>
@@ -86,15 +160,25 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
               <th>Symbol</th>
               <th>Quantity</th>
               <th>Avg cost</th>
+              <th>Current cost</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {holdings.map((holding) => (
+            {holdings.map((holding) => {
+              const currentPrice = currentPrices[holding.symbol];
+              return (
               <tr key={holding.id}>
                 <td>{holding.symbol}</td>
                 <td>{holding.quantity}</td>
                 <td>${holding.avg_cost.toFixed(2)}</td>
+                <td>
+                  {currentPrice !== undefined
+                    ? `$${currentPrice.toFixed(2)}`
+                    : quotesLoading
+                      ? "Loading..."
+                      : "Unavailable"}
+                </td>
                 <td className="holdings-row-actions">
                   <button
                     type="button"
@@ -114,7 +198,8 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -123,13 +208,10 @@ export function HoldingsPanel({ holdings, loading, onAdd, onUpdate, onRemove }: 
         <Modal title={editingHolding === "new" ? "Add holding" : `Edit ${editingHolding.symbol}`} onClose={closeModal}>
           <form className="holding-form" onSubmit={handleSubmit}>
             <label htmlFor="holding-symbol">Symbol</label>
-            <input
+            <SymbolCombobox
               id="holding-symbol"
-              placeholder="e.g. AAPL"
               value={form.symbol}
-              onChange={(e) => setForm({ ...form, symbol: e.target.value })}
-              maxLength={10}
-              required
+              onChange={(symbol) => setForm({ ...form, symbol })}
             />
 
             <label htmlFor="holding-quantity">Quantity</label>

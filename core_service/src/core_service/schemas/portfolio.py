@@ -18,3 +18,12 @@ class HoldingResponse(BaseModel):
     avg_cost: float
 
     model_config = {"from_attributes": True}
+
+class SymbolSearchResult(BaseModel):
+    symbol: str
+    name: str
+
+
+class QuoteResult(BaseModel):
+    symbol: str
+    price: float

@@ -1,4 +1,4 @@
-import { ApiError, Holding, InvestigationResult, LoginPayload, RegisterPayload, TokenResponse, User } from "./types";
+import { ApiError, Holding, InvestigationResult, LoginPayload, Quote, RegisterPayload, SymbolSearchResult, TokenResponse, User } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -131,3 +131,10 @@ export function investigate(question: string): Promise<InvestigationResult> {
   });
 }
 
+export function searchSymbols(query: string): Promise<SymbolSearchResult[]> {
+  return authRequest<SymbolSearchResult[]>(`/portfolio/symbol-search?q=${encodeURIComponent(query)}`);
+}
+
+export function getQuotes(symbols: string[]): Promise<Quote[]> {
+  return authRequest<Quote[]>(`/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+}

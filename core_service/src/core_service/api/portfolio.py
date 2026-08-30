@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -5,7 +7,17 @@ from sqlalchemy.orm import Session
 from core_service.api.deps import get_current_user
 from core_service.db.models import Holding, Portfolio, User
 from core_service.db.session import get_db
-from core_service.schemas.portfolio import HoldingCreate, HoldingResponse, HoldingUpdate
+import httpx
+
+from core_service.core.config import settings
+from core_service.schemas.portfolio import (
+    HoldingCreate,
+    HoldingResponse,
+    HoldingUpdate,
+    QuoteResult,
+    SymbolSearchResult,
+)
+
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -81,3 +93,58 @@ def delete_holding(
     holding = get_owned_holding(db, holding_id, current_user)
     db.delete(holding)
     db.commit()
+
+
+@router.get("/symbol-search", response_model=list[SymbolSearchResult])
+async def search_symbols(q: str, current_user: User = Depends(get_current_user)) -> list[SymbolSearchResult]:
+    """Live company/ticker search via Alpha Vantage SYMBOL_SEARCH, backing the
+    Add Holding form's autocomplete. Requires auth (same as every other
+    portfolio endpoint) so the API key/quota isn't exposed to anonymous callers.
+    """
+    query = q.strip()
+    if len(query) < 2:
+        return []
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://www.alphavantage.co/query",
+            params={"function": "SYMBOL_SEARCH", "keywords": query, "apikey": settings.alpha_vantage_api_key},
+        )
+    data = resp.json()
+    matches = data.get("bestMatches", [])
+
+    return [
+        SymbolSearchResult(symbol=m["1. symbol"], name=m["2. name"])
+        for m in matches
+        if m.get("4. region") == "United States"
+    ][:8]
+
+
+async def _fetch_quote(client: httpx.AsyncClient, symbol: str) -> QuoteResult | None:
+    resp = await client.get(
+        "https://www.alphavantage.co/query",
+        params={"function": "GLOBAL_QUOTE", "symbol": symbol, "apikey": settings.alpha_vantage_api_key},
+    )
+    price_str = resp.json().get("Global Quote", {}).get("05. price")
+    if price_str is None:
+        # Delisted/unknown ticker, or the free-tier rate limit kicked in --
+        # either way, omit it rather than fabricate a price (same
+        # not-available-over-fabricated principle as the Risk Agent).
+        return None
+    return QuoteResult(symbol=symbol, price=float(price_str))
+
+
+@router.get("/quotes", response_model=list[QuoteResult])
+async def get_quotes(symbols: str, current_user: User = Depends(get_current_user)) -> list[QuoteResult]:
+    """Current price per symbol, for the holdings table's "Current cost"
+    column. `symbols` is a comma-separated list so the frontend can fetch
+    every holding's price in one request instead of one per row.
+    """
+    requested = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not requested:
+        return []
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        results = await asyncio.gather(*(_fetch_quote(client, symbol) for symbol in requested))
+
+    return [quote for quote in results if quote is not None]

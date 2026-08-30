@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     internal_service_api_key: str
     agent_service_url: str = "http://localhost:8100"
+    alpha_vantage_api_key: str
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
