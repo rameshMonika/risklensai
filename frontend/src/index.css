@@ -126,6 +126,50 @@ body {
   font-size: 0.85rem;
 }
 
+.portfolio-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.8rem;
+  background: #f7f7f7;
+  border-radius: 6px;
+}
+
+.portfolio-summary-value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.portfolio-summary-label {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.portfolio-summary-value strong {
+  font-size: 1.15rem;
+}
+
+.portfolio-summary-delta {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.portfolio-summary-delta.delta-positive {
+  color: #1e8e3e;
+}
+
+.portfolio-summary-delta.delta-negative {
+  color: #c0392b;
+}
+
+.portfolio-summary-note {
+  font-size: 0.8rem;
+  color: #999;
+}
+
 .holdings-table {
   width: 100%;
   border-collapse: collapse;
@@ -243,6 +287,69 @@ body {
   font-size: 1rem;
 }
 
+.symbol-combobox {
+  position: relative;
+}
+
+.symbol-combobox input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.symbol-combobox-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.symbol-combobox-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.symbol-combobox-list li:hover {
+  background: #f5f5f7;
+}
+
+.symbol-combobox-status {
+  color: #999;
+  font-size: 0.85rem;
+  cursor: default;
+}
+
+.symbol-combobox-status:hover {
+  background: none;
+}
+
+.symbol-combobox-symbol {
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 3.5rem;
+}
+
+.symbol-combobox-name {
+  color: #666;
+  font-size: 0.85rem;
+}
+
 .holding-form button {
   margin-top: 1rem;
   padding: 0.6rem;
@@ -356,13 +463,306 @@ body {
   border-bottom: 2px solid #ddd;
 }
 
-.risk-results ul,
-.evidence ul {
-  margin: 0.25rem 0 0.75rem;
-  padding-left: 1.25rem;
+.result-section {
+  margin-top: 1.25rem;
 }
 
-.limitations p {
-  color: #555;
+.result-section h3 {
+  margin-bottom: 0.5rem;
+}
+
+.callout {
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid;
+}
+
+.callout h3 {
+  margin: 0 0 0.4rem;
   font-size: 0.9rem;
+}
+
+.callout p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.callout-interpretation {
+  background: #eaf6ed;
+  border-left-color: #1e8e3e;
+}
+
+.callout-limitations {
+  background: #f1f1f1;
+  border-left-color: #999;
+  color: #555;
+}
+
+.key-findings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.key-finding-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+  background: #fafcf9;
+}
+
+.key-finding-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #eaf6ed;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.key-finding-label {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.key-finding-value {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.metric-card-line {
+  font-size: 0.9rem;
+  color: #333;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.news-narrative-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.news-narrative-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.news-source-pill {
+  flex-shrink: 0;
+  background: #f1f1f1;
+  color: #555;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.news-narrative-title {
+  display: inline-block;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1a1a1a;
+  text-decoration: none;
+}
+
+.news-narrative-title:hover {
+  text-decoration: underline;
+  color: #2563eb;
+}
+
+.news-narrative-link-icon {
+  font-size: 0.7em;
+  margin-left: 0.3em;
+  color: #999;
+  vertical-align: super;
+}
+
+.news-narrative-title:hover .news-narrative-link-icon {
+  color: #2563eb;
+}
+
+.news-narrative-snippet {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  font-size: 0.7rem;
+}
+
+.status-completed {
+  background: #e6f4ea;
+  color: #1e8e3e;
+}
+
+.status-completed .status-icon {
+  background: #1e8e3e;
+  color: #fff;
+}
+
+.status-refused {
+  background: #f1f1f1;
+  color: #555;
+}
+
+.status-refused .status-icon {
+  background: #888;
+  color: #fff;
+}
+
+.status-not_found {
+  background: #fdf3e0;
+  color: #b5620a;
+}
+
+.status-not_found .status-icon {
+  background: #d68a2d;
+  color: #fff;
+}
+
+.answer-callout {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: #eef3fc;
+  border: 1px solid #dbe6fb;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.answer-callout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.answer-callout .investigation-answer {
+  flex: 1;
+}
+
+.concentration-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.concentration-row {
+  display: grid;
+  grid-template-columns: 4rem 1fr 4rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.concentration-header {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.concentration-symbol {
+  font-weight: 600;
+}
+
+.concentration-bar-track {
+  background: #f0f0f0;
+  border-radius: 999px;
+  height: 0.6rem;
+  overflow: hidden;
+}
+
+.concentration-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  /* Same green family as the portfolio summary's gain indicator, so the
+     app reads as one consistent "finance green" rather than mixing hues.
+     Checked against the #f0f0f0 track: contrast 2.14:1 (a pale tint here
+     read as nearly invisible against the track). */
+  background: #6fb583;
+}
+
+.concentration-bar-fill.is-largest {
+  background: #1e8e3e;
+}
+
+.concentration-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.metric-card {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+}
+
+.metric-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.metric-subtitle {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  padding: 0.15rem 0;
+}
+
+.metric-row span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+.page-footer {
+  text-align: center;
+  font-size: 0.75rem;
+  color: #999;
+  margin-top: 1.5rem;
+  line-height: 1.5;
 }

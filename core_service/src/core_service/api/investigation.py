@@ -10,16 +10,22 @@ from core_service.api.portfolio import get_or_create_portfolio
 from core_service.core.agent_client import investigate as call_agent
 from core_service.db.models import Evidence, Holding, Investigation, InvestigationReport, User
 from core_service.db.session import get_db
-from core_service.schemas.investigation import EvidenceItem, InvestigationCreate, InvestigationResponse
+from core_service.schemas.investigation import (
+    ConcentrationResult,
+    EvidenceItem,
+    InvestigationCreate,
+    InvestigationResponse,
+)
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
 
 DEFAULT_LOOKBACK_DAYS = 90
 
-# Metrics the frontend's flat Record<metric, Record<symbol, number>> rendering
-# can display -- concentration/sector_exposure/correlation_matrix are nested
-# differently and aren't sent to the frontend (see CLAUDE.md's risk_results note).
-FLAT_RISK_METRICS = {"volatility", "max_drawdown"}
+# Metrics shaped as {symbol_or_sector: value} that fit the frontend's flat
+# Record<metric, Record<symbol, number>> rendering. concentration and
+# correlation_matrix don't fit this flat shape (nested), so each gets its own
+# typed field on the response instead.
+FLAT_RISK_METRICS = {"volatility", "max_drawdown", "sector_exposure", "loss_contribution"}
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -86,19 +92,29 @@ async def create_investigation(
     ))
     db.commit()
 
+    raw_risk_results = agent_result.get("risk_results") or {}
     flat_risk_results = {
-        metric: values
-        for metric, values in (agent_result.get("risk_results") or {}).items()
-        if metric in FLAT_RISK_METRICS
+        metric: values for metric, values in raw_risk_results.items() if metric in FLAT_RISK_METRICS
     }
+    concentration_data = raw_risk_results.get("concentration")
+    concentration = ConcentrationResult(**concentration_data) if concentration_data else None
+    correlation_matrix = raw_risk_results.get("correlation_matrix")
 
     return InvestigationResponse(
         question=payload.question,
         answer=agent_result["answer"],
+        status=investigation_status,
         trajectory=agent_result.get("trajectory", []),
         risk_results=flat_risk_results,
+        concentration=concentration,
+        correlation_matrix=correlation_matrix,
         evidence=[
-            EvidenceItem(symbol=ev["symbol"], title=ev.get("title"), source_url=ev.get("source_url"))
+            EvidenceItem(
+                symbol=ev["symbol"],
+                title=ev.get("title"),
+                source_url=ev.get("source_url"),
+                evidence_text=ev.get("evidence_text"),
+            )
             for ev in agent_result.get("evidence", [])
         ],
         limitations=None,

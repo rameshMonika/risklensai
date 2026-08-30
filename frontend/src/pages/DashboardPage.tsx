@@ -33,6 +33,11 @@ export function DashboardPage() {
       <InvestigationInput loading={investigationLoading} onSubmit={submit} />
 
       <InvestigationReport result={result} loading={investigationLoading} error={error} />
+
+      <footer className="page-footer">
+        <p>Data is for informational purposes only and not financial advice.</p>
+        <p>Past performance does not guarantee future results.</p>
+      </footer>
     </div>
   );
 }
