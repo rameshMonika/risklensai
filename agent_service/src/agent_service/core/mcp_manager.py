@@ -5,6 +5,7 @@ since spawning a Python process per call would be far too slow.
 """
 
 import json
+import os
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -28,7 +29,15 @@ class MCPManager:
 
     async def connect_all(self) -> None:
         for name, script_path in SERVER_SCRIPTS.items():
-            params = StdioServerParameters(command=sys.executable, args=[str(script_path)])
+            # Explicit env passthrough: the MCP SDK's default (when `env` is
+            # omitted) only inherits a small safe allowlist (PATH, HOME, ...),
+            # not arbitrary vars like TAVILY_API_KEY -- local dev never
+            # noticed because news_server.py's own load_dotenv() reads a
+            # physical .env file from disk, but a container has no such file
+            # (deliberately excluded via .dockerignore), only real env vars.
+            params = StdioServerParameters(
+                command=sys.executable, args=[str(script_path)], env=os.environ.copy()
+            )
             read, write = await self._exit_stack.enter_async_context(stdio_client(params))
             session = await self._exit_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
