@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "uvicorn[standard]>=0.52.3",
     "httpx>=0.28.0",
+    "alembic>=1.19.1",
 ]
 
 [project.scripts]
