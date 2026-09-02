@@ -22,18 +22,32 @@ from typing import Optional
 import numpy as np
 import truststore
 
+print("ROUTER CHECKPOINT A: numpy/truststore imported", flush=True)
+
 truststore.inject_into_ssl()
+
+print("ROUTER CHECKPOINT B: truststore injected", flush=True)
 
 from semantic_router.encoders import HuggingFaceEncoder
 
+print("ROUTER CHECKPOINT C: semantic_router.encoders imported", flush=True)
+
 from agent_service.graph.intents import ROUTE_UTTERANCES, INTENT_ROUTES
+
+print("ROUTER CHECKPOINT D: intents imported", flush=True)
 
 CALIBRATION_PATH = Path(__file__).resolve().parent.parent / "calibration" / "router_calibration.json"
 
+print("ROUTER CHECKPOINT E: about to construct HuggingFaceEncoder", flush=True)
+
 encoder = HuggingFaceEncoder(score_threshold=0.0)
+
+print("ROUTER CHECKPOINT F: HuggingFaceEncoder constructed", flush=True)
 
 with open(CALIBRATION_PATH) as f:
     _calibration = json.load(f)
+
+print("ROUTER CHECKPOINT G: calibration json loaded", flush=True)
 
 INTENT_CLUSTER_VECTORS: dict[str, np.ndarray] = {
     intent: np.array(vectors) for intent, vectors in _calibration["cluster_vectors"].items()
