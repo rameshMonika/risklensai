@@ -6,12 +6,27 @@ a shared internal API key, not a user JWT.
 from contextlib import asynccontextmanager
 from datetime import datetime
 
+print("CHECKPOINT 1: stdlib imports done", flush=True)
+
 from fastapi import Depends, FastAPI
 
+print("CHECKPOINT 2: fastapi imported", flush=True)
+
 from agent_service.core.mcp_manager import mcp_manager
+
+print("CHECKPOINT 3: mcp_manager imported", flush=True)
+
 from agent_service.core.security import verify_internal_api_key
+
+print("CHECKPOINT 4: security imported", flush=True)
+
 from agent_service.graph.build import run_investigation
+
+print("CHECKPOINT 5: graph.build imported (this pulls in nodes/guardrail/router/llm)", flush=True)
+
 from agent_service.schemas.investigate import EvidenceOut, InvestigateRequest, InvestigateResponse
+
+print("CHECKPOINT 6: schemas imported, main.py module body continuing", flush=True)
 
 
 @asynccontextmanager

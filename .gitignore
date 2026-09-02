@@ -5,3 +5,12 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 *.egg-info/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.auto.tfvars
+*.auto.tfvars.json
