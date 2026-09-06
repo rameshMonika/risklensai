@@ -21,7 +21,11 @@ async def investigate(holdings: list[Holding], question: str, start_date: date, 
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # A full investigation fans out to several MCP/API calls plus 2+ LLM calls
+    # on gpt-oss-120b (a reasoning model), so the read budget is generous; a
+    # genuinely-down agent still fails fast on the short connect timeout.
+    timeout = httpx.Timeout(180.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{settings.agent_service_url}/internal/investigate",
             json=payload,
