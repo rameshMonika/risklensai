@@ -1,0 +1,71 @@
+# Local full-stack run: Postgres + core-service + agent-service + frontend,
+# all built from their own Dockerfiles. Mirrors the Azure Container Apps
+# topology (frontend -> core -> agent, agent has no DB).
+#
+#   docker compose up --build        first run (slow: agent image bakes torch + the router model)
+#   docker compose up -d             start detached
+#   docker compose logs -f agent-service
+#   docker compose down              stop (keeps the db volume)
+#   docker compose down -v           stop and wipe the db
+#
+# Each service still reads its own <service>/.env for secrets; the overrides
+# below only swap localhost hostnames for the compose network names.
+
+name: risklens
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "@kinom"
+      POSTGRES_DB: risklens
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d risklens"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  agent-service:
+    build:
+      context: ./agent_service
+    env_file:
+      - ./agent_service/.env
+    environment:
+      LLM_PROVIDER: groq           # Groq gpt-oss-20b (GROQ_API_KEY from .env); set to "azure" for Foundry
+    ports:
+      - "8100:8100"
+
+  core-service:
+    build:
+      context: ./core_service
+    env_file:
+      - ./core_service/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:%40kinom@postgres:5432/risklens
+      AGENT_SERVICE_URL: http://agent-service:8100
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agent-service:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - core-service
+
+volumes:
+  pgdata:
