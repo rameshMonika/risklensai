@@ -212,8 +212,9 @@ Prereqs: `az` CLI (logged in), `terraform` ≥ 1.9, Docker, Node.
 
 - **State backend** — create the storage account that holds Terraform state and
   register the resource providers. Follow
-  [`infra/bootstrap/README.md`](infra/bootstrap/README.md) (steps 1–2). Run once
-  per subscription.
+  [`infra/bootstrap/README.md`](infra/bootstrap/README.md) (steps 1–2). Genuinely
+  once per subscription — it lives in its own resource group (`rg-risklens-tfstate`)
+  and survives a `terraform destroy`, so **skip this on a rebuild**.
 
 - **Secrets** — create `infra/env/secrets.auto.tfvars` (**gitignored — never
   commit it**) with:
@@ -235,14 +236,19 @@ Prereqs: `az` CLI (logged in), `terraform` ≥ 1.9, Docker, Node.
 ```powershell
 az login
 cd infra/env
-terraform init
+terraform init          # only needed the first time, or after a fresh clone
 terraform apply
 ```
 
 This creates everything **except** the two container apps, which fail on the
 first apply with `MANIFEST_UNKNOWN` — Azure validates the image at create time
-and it doesn't exist yet. That's expected. Build and push the images, then apply
-again.
+and it doesn't exist yet. That's expected. Build and push the images (step 3),
+then apply again (step 4).
+
+> **`Error acquiring the state lock`** — a previous run was interrupted and left
+> the lock in the state blob. The error prints the lock ID; clear it with
+> `terraform force-unlock <ID>` (safe as long as no other `terraform` is
+> actually running), then re-run.
 
 ## 3. Build and push the service images
 
@@ -310,3 +316,28 @@ The Static Web App, Foundry (pay-per-token), ACR, and Key Vault have no idle
 cost worth managing and are left running. **Start Postgres (`manage.ps1 start`)
 before running `terraform apply` from `infra/env/`** — Terraform can't refresh a
 stopped server.
+
+## Tearing it down
+
+```powershell
+./infra/manage.ps1 start          # Postgres must be running for destroy to refresh it
+cd infra/env
+terraform destroy
+```
+
+Then **purge the soft-deleted resources** — Key Vault and Cognitive Services
+sit in a recycle bin after deletion, and their names stay reserved, so the next
+`terraform apply` fails on `kv-risklens-rm7` / `risklens-ai-foundry` until you
+purge:
+
+```powershell
+az keyvault list-deleted -o table
+az keyvault purge -n kv-risklens-rm7
+
+az cognitiveservices account list-deleted -o table
+az cognitiveservices account purge --name risklens-ai-foundry --location eastus2
+```
+
+If `terraform destroy` clears the state but leaves resources in Azure (it can,
+if it errors mid-run), delete the group directly instead:
+`az group delete -n rg-risklens --yes`, then purge as above.
