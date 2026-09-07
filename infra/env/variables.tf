@@ -34,3 +34,9 @@ variable "tavily_api_key" {
   type      = string
   sensitive = true
 }
+
+variable "langsmith_api_key" {
+  description = "LangSmith API key for LangGraph tracing (agent-service). Get one at https://smith.langchain.com/settings."
+  type        = string
+  sensitive   = true
+}

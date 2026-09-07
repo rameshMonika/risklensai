@@ -3,12 +3,13 @@
   Start / stop / check the RiskLens Azure stack to avoid paying for it while idle.
 
 .DESCRIPTION
-  stop   - stops Postgres Flexible Server, scales all 3 Container Apps to 0 replicas.
+  stop   - stops Postgres Flexible Server, scales core-service + agent-service to 0.
   start  - starts Postgres, waits until it's Ready, sets agent-service back to 1
-           warm replica (frontend/core stay scale-to-zero, they cold-start fast).
-  status - prints Postgres state, per-app min replicas + live replica counts, URLs.
+           warm replica (core-service stays scale-to-zero, it cold-starts fast).
+  status - prints Postgres state, per-app min/live replicas, and the app URLs.
 
-  Not stopped by either action (all ~$0 or trivial at rest):
+  Not touched by any action (all ~$0 or trivial at rest):
+    frontend (Azure Static Web App - always served from the CDN, nothing to stop),
     risklens-ai-foundry (pay-per-token), ACR acrrisklens (~$5/mo, holds images),
     Key Vault, VNet, Log Analytics.
 
@@ -30,7 +31,8 @@ $ErrorActionPreference = 'Stop'
 # --- config -------------------------------------------------------------------
 $ResourceGroup  = 'rg-risklens'
 $PostgresServer = 'psql-risklens'
-$Apps           = @('frontend', 'core-service', 'agent-service')
+$StaticWebApp   = 'risklens-frontend'
+$Apps           = @('core-service', 'agent-service')   # container apps only; frontend is a SWA
 $WarmApp        = 'agent-service'   # kept at 1 replica on start (torch cold start is slow)
 # ---------------------------------------------------------------------------- --
 
@@ -91,6 +93,23 @@ function Invoke-Stop {
     Set-AppMinReplicas $app 0
   }
   Write-Host "`nStopped. Container Apps drain to 0 replicas within ~5 min (cooldown)." -ForegroundColor Green
+  Write-Host "frontend (Static Web App) is not touched -- it has no compute and no idle cost." -ForegroundColor DarkGray
+}
+
+function Get-SwaLine {
+  $swa = Invoke-Az @('staticwebapp', 'show', '-g', $ResourceGroup, '-n', $StaticWebApp)
+  if (-not $swa) { return "  {0,-14} not found" -f 'frontend' }
+  $swaHost = $swa.defaultHostname
+  # Is it actually serving the app, or still the placeholder / unreachable?
+  $served = 'unknown'
+  try {
+    $prev = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+    $r = Invoke-WebRequest -Uri "https://$swaHost" -Method Head -TimeoutSec 10 -UseBasicParsing
+    $ProgressPreference = $prev
+    $served = if ($r.StatusCode -eq 200) { 'serving (HTTP 200)' } else { "HTTP $($r.StatusCode)" }
+  }
+  catch { $served = 'unreachable' }
+  return "  {0,-14} https://{1}  [{2}]" -f 'frontend', $swaHost, $served
 }
 
 function Invoke-Start {
@@ -130,9 +149,12 @@ function Invoke-Status {
   }
 
   Write-Host "`nURLs:" -ForegroundColor Cyan
-  foreach ($app in @('frontend', 'core-service')) {
+  Write-Host (Get-SwaLine)
+  foreach ($app in $Apps) {
     $show = Invoke-Az @('containerapp', 'show', '-g', $ResourceGroup, '-n', $app)
-    Write-Host ("  {0,-14} https://{1}" -f $app, $show.properties.configuration.ingress.fqdn)
+    $fqdn = $show.properties.configuration.ingress.fqdn
+    if ($fqdn) { Write-Host ("  {0,-14} https://{1}" -f $app, $fqdn) }
+    else { Write-Host ("  {0,-14} (internal ingress -- no public URL)" -f $app) }
   }
 }
 

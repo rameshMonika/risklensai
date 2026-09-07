@@ -75,6 +75,7 @@ module "key_vault" {
     "alpha-vantage-api-key"    = var.alpha_vantage_api_key
     "tavily-api-key"           = var.tavily_api_key
     "azure-openai-api-key"     = module.openai.primary_key
+    "langsmith-api-key"        = var.langsmith_api_key
     "database-url"             = "postgresql+psycopg2://${module.postgres.administrator_login}:${urlencode(var.postgres_administrator_password)}@${module.postgres.fqdn}:5432/${module.postgres.database_name}?sslmode=require"
   }
 }
@@ -89,19 +90,15 @@ module "container_apps_env" {
 }
 
 
+# The front end is a static React/Vite build -- served by Azure Static Web
+# Apps (CDN + managed TLS), not a container. No image, no ACR repo, no ingress.
+# Deploy with `swa deploy ./dist --deployment-token <frontend_deploy_token>`.
 module "frontend" {
-  source = "../modules/container_app"
+  source = "../modules/static_web_app"
 
-  name                         = "frontend"
-  resource_group_name          = azurerm_resource_group.this.name
-  location                     = var.location
-  container_app_environment_id = module.container_apps_env.id
-  acr_login_server             = module.acr.login_server
-  acr_id                       = module.acr.id
-
-  image            = "${module.acr.login_server}/risklens-frontend:latest"
-  target_port      = 80
-  ingress_external = true
+  name                = "${local.name_prefix}-frontend"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = var.location
 }
 
 module "core_service" {
@@ -119,7 +116,7 @@ module "core_service" {
   ingress_external = true
 
   env_vars = {
-    CORS_ORIGINS      = "[\"https://${module.frontend.fqdn}\"]"
+    CORS_ORIGINS      = "[\"${module.frontend.url}\"]"
     AGENT_SERVICE_URL = "https://${module.agent_service.fqdn}"
   }
 
@@ -167,6 +164,8 @@ module "agent_service" {
     AZURE_OPENAI_ENDPOINT    = module.openai.endpoint
     AZURE_OPENAI_DEPLOYMENT  = module.openai.deployment_name
     AZURE_OPENAI_API_VERSION = "2024-10-21"
+    LANGSMITH_TRACING        = "true"
+    LANGSMITH_PROJECT        = "risklens-agent"
   }
 
   key_vault_id = module.key_vault.id
@@ -174,10 +173,12 @@ module "agent_service" {
     "internal-service-api-key" = module.key_vault.secret_ids["internal-service-api-key"]
     "tavily-api-key"           = module.key_vault.secret_ids["tavily-api-key"]
     "azure-openai-api-key"     = module.key_vault.secret_ids["azure-openai-api-key"]
+    "langsmith-api-key"        = module.key_vault.secret_ids["langsmith-api-key"]
   }
   secret_env_vars = {
     INTERNAL_SERVICE_API_KEY = "internal-service-api-key"
     TAVILY_API_KEY           = "tavily-api-key"
     AZURE_OPENAI_API_KEY     = "azure-openai-api-key"
+    LANGSMITH_API_KEY        = "langsmith-api-key"
   }
 }
