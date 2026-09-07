@@ -231,30 +231,29 @@ Prereqs: `az` CLI (logged in), `terraform` ≥ 1.9, Docker, Node.
   The Azure AI Foundry key is **not** here — Terraform reads it off the Foundry
   resource it creates and writes it into Key Vault itself.
 
-## 2. Provision the infrastructure
+## 2. Create the container registry first
+
+Azure Container Apps validates a container image at **create** time — if the
+image isn't in the registry yet, the app fails to create and leaves a broken
+shell behind. So build the registry on its own first, push images to it, then
+provision the rest in one pass.
 
 ```powershell
 az login
 cd infra/env
-terraform init          # only needed the first time, or after a fresh clone
-terraform apply
+terraform init                        # first run / fresh clone only
+terraform apply -target=module.acr     # creates just the resource group + ACR
 ```
 
-This creates everything **except** the two container apps, which fail on the
-first apply with `MANIFEST_UNKNOWN` — Azure validates the image at create time
-and it doesn't exist yet. That's expected. Build and push the images (step 3),
-then apply again (step 4).
-
-> **`Error acquiring the state lock`** — a previous run was interrupted and left
-> the lock in the state blob. The error prints the lock ID; clear it with
-> `terraform force-unlock <ID>` (safe as long as no other `terraform` is
-> actually running), then re-run.
+(Terraform warns that `-target` is a partial apply — that's intentional here.)
 
 ## 3. Build and push the service images
 
-ACR Tasks is disabled on this subscription, so images build locally.
+ACR Tasks is disabled on this subscription, so images build locally. Docker
+Desktop must be running. Run from the **repo root**.
 
 ```powershell
+cd ..\..
 az acr login -n acrrisklens
 $acr = "acrrisklens.azurecr.io"
 
@@ -263,15 +262,23 @@ docker push  $acr/risklens-core-service:latest
 
 docker build --platform linux/amd64 -t $acr/risklens-agent-service:latest agent_service
 docker push  $acr/risklens-agent-service:latest
+
+az acr repository list -n acrrisklens -o table   # confirm BOTH repos are listed
 ```
 
-## 4. Apply again — creates the container apps
+## 4. Provision everything else
 
 ```powershell
 cd infra/env
 terraform apply
 terraform output          # frontend_url, core_service_url, acr_login_server, ...
 ```
+
+One pass — network, Postgres, Foundry, Key Vault, the ACA environment, the
+Static Web App, and both container apps (which now find their images). If you
+hit `Error acquiring the state lock`, a previous run left it behind — clear it
+with `terraform force-unlock <ID>` (the error prints the ID; safe as long as no
+other `terraform` is running) and re-run.
 
 `core-service`'s entrypoint runs `alembic upgrade head` on boot, so the schema
 self-applies on the new Postgres.
