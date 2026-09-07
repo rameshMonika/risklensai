@@ -241,11 +241,12 @@ provision the rest in one pass.
 ```powershell
 az login
 cd infra/env
-terraform init                        # first run / fresh clone only
-terraform apply -target=module.acr     # creates just the resource group + ACR
+terraform init                          # first run / fresh clone only
+terraform apply "-target=module.acr"     # creates just the resource group + ACR
 ```
 
-(Terraform warns that `-target` is a partial apply — that's intentional here.)
+(The quotes around `-target=...` are for PowerShell; Terraform warns that
+`-target` is a partial apply — that's intentional here.)
 
 ## 3. Build and push the service images
 
