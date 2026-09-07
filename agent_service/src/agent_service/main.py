@@ -20,6 +20,13 @@ from agent_service.core.security import verify_internal_api_key
 
 print("CHECKPOINT 4: security imported", flush=True)
 
+from agent_service.core.observability import configure_tracing
+
+# Push LANGSMITH_* into os.environ (from .env / Settings) before the graph is
+# imported and the first request runs, so LangChain/LangGraph auto-tracing picks
+# it up. No-op when tracing is disabled.
+configure_tracing()
+
 from agent_service.graph.build import run_investigation
 
 print("CHECKPOINT 5: graph.build imported (this pulls in nodes/guardrail/router/llm)", flush=True)
@@ -51,7 +58,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
 @app.post("/internal/investigate", response_model=InvestigateResponse, dependencies=[Depends(verify_internal_api_key)])
 async def investigate(payload: InvestigateRequest) -> InvestigateResponse:
     holdings = [h.model_dump() for h in payload.holdings]
-    final_state = await run_investigation(payload.question, holdings, payload.start_date, payload.end_date)
+    final_state, trace_id = await run_investigation(
+        payload.question, holdings, payload.start_date, payload.end_date
+    )
 
     target = final_state.get("target_symbol") or final_state.get("news_target")
     evidence = [
@@ -73,6 +82,7 @@ async def investigate(payload: InvestigateRequest) -> InvestigateResponse:
         evidence=evidence,
         refused=final_state.get("refused", False),
         not_found=final_state.get("not_found", False),
+        observability_trace_id=trace_id,
     )
 
 

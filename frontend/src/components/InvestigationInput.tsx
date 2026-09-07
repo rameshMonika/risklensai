@@ -8,7 +8,9 @@ interface InvestigationInputProps {
 const SAMPLE_QUESTIONS = [
   "What are my holdings?",
   "How concentrated am I?",
+  "What's NVDA's 30-day volatility?",
   "Why did NVDA fall this week?",
+  "Investigate my portfolio risk",
 ];
 
 export function InvestigationInput({ loading, onSubmit }: InvestigationInputProps) {

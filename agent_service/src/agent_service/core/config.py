@@ -24,5 +24,13 @@ class Settings(BaseSettings):
 
     internal_service_api_key: str
 
+    # LangSmith tracing. LangGraph/LangChain auto-instrument when these are in
+    # os.environ (see core/observability.py, which bridges them from here since
+    # pydantic-settings does not export .env values to the environment).
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+    langsmith_project: str = "risklens-agent"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+
 
 settings = Settings()

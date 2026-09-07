@@ -4,9 +4,12 @@ Exposes run_investigation() as the entrypoint main.py calls per request.
 """
 
 from datetime import date
-from typing import Literal
+from typing import Literal, Optional
 
+from langchain_core.tracers.context import collect_runs
 from langgraph.graph import END, START, StateGraph
+
+from agent_service.core.config import settings
 
 from agent_service.graph.guardrail import guardrail_node, route_after_guardrail
 from agent_service.graph.nodes import (
@@ -84,8 +87,24 @@ def _initial_state(question: str, holdings: list[dict], start_date: date, end_da
     )
 
 
-async def run_investigation(question: str, holdings: list[dict], start_date: date, end_date: date) -> InvestigationState:
+async def run_investigation(
+    question: str, holdings: list[dict], start_date: date, end_date: date
+) -> tuple[InvestigationState, Optional[str]]:
     """The entrypoint main.py's POST /internal/investigate handler calls.
     Async (ainvoke, not invoke) since market_node/risk_node/news_node are
-    async MCP-calling nodes."""
-    return await app.ainvoke(_initial_state(question, holdings, start_date, end_date))
+    async MCP-calling nodes.
+
+    Returns (final_state, trace_id). trace_id is the LangSmith root-run id for
+    this investigation -- Core persists it as INVESTIGATION.observability_trace_id
+    so a run can be pulled up in the LangSmith UI later. It's None when tracing
+    is disabled (no LangSmith key), so the column stays null rather than holding
+    an id that points at nothing.
+    """
+    with collect_runs() as runs_cb:
+        final_state = await app.ainvoke(_initial_state(question, holdings, start_date, end_date))
+
+    trace_id: Optional[str] = None
+    if settings.langsmith_tracing and runs_cb.traced_runs:
+        trace_id = str(runs_cb.traced_runs[0].id)
+
+    return final_state, trace_id

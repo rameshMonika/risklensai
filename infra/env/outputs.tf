@@ -1,5 +1,11 @@
 output "frontend_url" {
-  value = "https://${module.frontend.fqdn}"
+  value = module.frontend.url
+}
+
+output "frontend_deploy_token" {
+  description = "Static Web Apps deployment token for `swa deploy` / GitLab CI."
+  value       = module.frontend.api_key
+  sensitive   = true
 }
 
 output "core_service_url" {

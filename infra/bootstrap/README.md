@@ -37,9 +37,10 @@ letters/numbers only, 3-24 characters.
 
 One-time per subscription:
 
-    az provider register --namespace Microsoft.CognitiveServices --wait
-    az provider register --namespace Microsoft.App --wait
-    az provider register --namespace Microsoft.DBforPostgreSQL --wait
+    az provider register --namespace Microsoft.CognitiveServices --wait   # Azure AI Foundry
+    az provider register --namespace Microsoft.App --wait                 # Container Apps (core, agent)
+    az provider register --namespace Microsoft.DBforPostgreSQL --wait     # Postgres Flexible Server
+    az provider register --namespace Microsoft.Web --wait                 # Static Web Apps (frontend)
 
 ## 3. Then
 
@@ -50,6 +51,23 @@ One-time per subscription:
 
 `infra/env/secrets.auto.tfvars` (gitignored) supplies the secret variables:
 `postgres_administrator_password`, `jwt_secret`, `internal_service_api_key`,
-`alpha_vantage_api_key`, `tavily_api_key`. The Azure AI Foundry key is not among
-them — Terraform reads it straight off the `openai` module and writes it into
-Key Vault.
+`alpha_vantage_api_key`, `tavily_api_key`, `langsmith_api_key`. The Azure AI
+Foundry key is not among them — Terraform reads it straight off the `openai`
+module and writes it into Key Vault.
+
+## 4. Deploy the front end
+
+Terraform creates the Static Web App empty (it serves a placeholder until the
+first upload). The React build is deployed separately — not by Terraform:
+
+    cd frontend
+    npm ci
+    $env:VITE_API_BASE_URL = (terraform -chdir=../infra/env output -raw core_service_url)
+    npm run build
+    npx --yes @azure/static-web-apps-cli deploy ./dist `
+      --deployment-token (terraform -chdir=../infra/env output -raw frontend_deploy_token) `
+      --env production
+
+Later this becomes a GitLab CI job with the deploy token as a masked variable.
+The two service containers deploy the usual way: `docker build` / `push` to ACR,
+then `az containerapp update --image`.

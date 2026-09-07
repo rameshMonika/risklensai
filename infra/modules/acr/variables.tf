@@ -11,7 +11,7 @@ variable "location" {
 }
 
 variable "sku" {
-  description = "Basic is enough for 3 low-traffic images at this project's scale."
+  description = "Basic is enough for 2 low-traffic images at this project's scale."
   type        = string
   default     = "Basic"
 }

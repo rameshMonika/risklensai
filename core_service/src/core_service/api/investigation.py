@@ -71,6 +71,7 @@ async def create_investigation(
         start_date=start_date,
         end_date=end_date,
         risk_results=agent_result.get("risk_results") or None,
+        observability_trace_id=agent_result.get("observability_trace_id"),
     )
     db.add(investigation)
     db.flush()  # populates investigation.id for the FK rows below
