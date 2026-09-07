@@ -298,19 +298,17 @@ npx --yes @azure/static-web-apps-cli deploy ./dist `
   --env production
 ```
 
-Then open the frontend URL — `terraform "-chdir=infra\env" output -raw frontend_url`
-from the repo root, or `terraform output -raw frontend_url` from `infra/env/`.
+## 6. Test it
 
-## Redeploying after a code change
+Open the **frontend URL** — this is the app:
 
-- **A service** — rebuild + push its image (step 3), then roll the revision:
-  ```powershell
-  az containerapp update -g rg-risklens -n core-service  --image $acr/risklens-core-service:latest
-  az containerapp update -g rg-risklens -n agent-service --image $acr/risklens-agent-service:latest
-  ```
-  (`terraform apply` won't roll a revision — the `:latest` tag doesn't change.)
-- **The front end** — rerun step 5 (rebuild with the cloud `core_service_url`, then `swa deploy`). Hard-refresh the browser afterward.
-- **Infra** — `terraform apply` from `infra/env/`.
+```powershell
+terraform "-chdir=infra\env" output -raw frontend_url    # https://<name>.azurestaticapps.net
+```
+
+Register, add holdings (`AAPL`, `NVDA`, `MSFT`, `GOOGL`, `TSLA`), run an
+investigation. `core_service_url` is the API behind it — you only need it for
+`/health` checks, not for using the app.
 
 ## Pausing to save cost
 
