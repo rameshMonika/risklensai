@@ -5,8 +5,6 @@ pipeline routes a natural-language question to specialised agents, combines
 deterministic risk calculations with retrieved market and news evidence, and
 returns a grounded, cited report.
 
-See [`CLAUDE.md`](CLAUDE.md) for the full architecture and design rationale.
-
 ## Two ways to run it
 
 1. **[Run locally](#run-locally)** — on your machine, with Docker or with `uv` + Node. Start here.
@@ -98,38 +96,33 @@ and fill in `GROQ_API_KEY`, `TAVILY_API_KEY`, `ALPHA_VANTAGE_API_KEY` — the sa
 three keys from step 2. It has no shared secret and no LangSmith entry; it's a
 smaller subset. Running the app never reads it.
 
-### ⚠️ Files you must never commit
-
-These are already in `.gitignore` — keep it that way. If `git status` ever shows one, do **not** `git add` it:
-
-| File | What it holds |
-|---|---|
-| `core_service/.env`, `agent_service/.env`, `frontend/.env` (any `.env`) | your API keys and secrets |
-| `infra/env/secrets.auto.tfvars` | the Azure deploy secrets (see the Azure section) |
-| `**/.terraform/`, `*.tfstate*`, `*.tfplan` | Terraform state — can contain secrets in plaintext |
-| `.venv/`, `__pycache__/`, `frontend/node_modules/` | local build junk |
-
-Only the `*.env.example` files and `infra/env/terraform.tfvars` (region config, no secrets) are safe to commit.
+> Your `.env` files, `infra/env/secrets.auto.tfvars`, and Terraform state are
+> already in `.gitignore` — don't `git add` them if `git status` surfaces one.
+> Only the `*.env.example` files and `infra/env/terraform.tfvars` (region only,
+> no secrets) belong in the repo.
 
 ## 4. Run it
 
-### 4a. Docker Compose — one command
+### 4a. Docker for the backend, Vite for the frontend
+
+`docker-compose.yml` runs the three container tiers — Postgres, `core-service`,
+`agent-service` (the frontend isn't containerised; it's Vite here, Static Web
+Apps in the cloud).
 
 ```bash
 docker compose up --build
 ```
 
-Brings up Postgres, `core-service`, `agent-service`, and `frontend` (on 5173).
 First build is slow (~10–20 min) — the agent image compiles PyTorch and bakes
 the semantic-router model; later runs are cached. Database migrations run
 automatically on `core-service` startup.
 
-Backend in Docker, frontend live-reloading with Vite:
+Then, in another terminal:
 
 ```bash
-docker compose up --build postgres core-service agent-service
-# then, in another terminal:
-cd frontend && npm ci && npm run dev
+cd frontend
+npm ci
+npm run dev          # http://localhost:5173
 ```
 
 Handy:
