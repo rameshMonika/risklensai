@@ -1,0 +1,72 @@
+# GitLab CI/CD for RiskLens.
+#
+# Stage 1 (this file): the test suites. Runs on every push and MR.
+#   test:risk   -- deterministic risk-calc math (root project)
+#   test:agent  -- agent graph pure logic (agent_service; encoder is stubbed)
+#   test:core   -- core API + persistence (core_service; needs a Postgres)
+#
+# Stages 2-3 (build + deploy) are added once the Azure OIDC identity exists.
+
+stages:
+  - validate
+
+# uv image: has Python 3.12 + uv, nothing else. Each job syncs its own project.
+default:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  interruptible: true
+
+variables:
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_NATIVE_TLS: "true"
+
+cache:
+  key:
+    files:
+      - uv.lock
+      - agent_service/uv.lock
+      - core_service/uv.lock
+  paths:
+    - .uv-cache
+
+# --------------------------------------------------------------------------- #
+
+test:risk:
+  stage: validate
+  script:
+    - uv sync --group dev
+    - uv run pytest tests/ -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+test:agent:
+  stage: validate
+  script:
+    - cd agent_service
+    - uv sync --group dev
+    - uv run pytest -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+test:core:
+  stage: validate
+  services:
+    - name: postgres:16
+      alias: postgres
+  variables:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: risklens
+    DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/risklens"
+    # conftest.py also needs these (core/config.py has required settings):
+    JWT_SECRET: "ci-test-jwt-secret"
+    INTERNAL_SERVICE_API_KEY: "ci-test-internal-key"
+    ALPHA_VANTAGE_API_KEY: "ci-test-av-key"
+  script:
+    - cd core_service
+    - uv sync --group dev
+    - uv run pytest -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
