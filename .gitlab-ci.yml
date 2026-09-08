@@ -21,10 +21,12 @@ variables:
 
 cache:
   key:
+    # GitLab allows at most 2 files here. agent_service/uv.lock is the one that
+    # matters most (torch etc.); the root lock covers the rest. core_service's
+    # deps are light -- a stale-key run just re-resolves them, cheaply.
     files:
       - uv.lock
       - agent_service/uv.lock
-      - core_service/uv.lock
   paths:
     - .uv-cache
 
