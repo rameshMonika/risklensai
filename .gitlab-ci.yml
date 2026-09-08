@@ -1,66 +1,70 @@
 # GitLab CI/CD for RiskLens.
 #
-# Stage 1 (this file): the test suites. Runs on every push and MR.
-#   test:risk   -- deterministic risk-calc math (root project)
-#   test:agent  -- agent graph pure logic (agent_service; encoder is stubbed)
-#   test:core   -- core API + persistence (core_service; needs a Postgres)
+#   validate  (every push + MR)  -- test:risk / test:agent / test:core
+#   build     (main only)        -- SHA-tagged images to ACR; frontend dist artifact
+#   deploy    (main only)        -- az containerapp update + swa deploy
 #
-# Stages 2-3 (build + deploy) are added once the Azure OIDC identity exists.
+# Azure auth is OIDC federation (no stored secret). `terraform apply` is NOT in
+# CI -- infra changes stay manual. build:agent / deploy:agent and the frontend
+# jobs only run when their own directory changed; build:core / deploy:core run
+# on every main pipeline (core builds fast).
+#
+# Required CI/CD variables (Settings -> CI/CD -> Variables):
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   (from setup-gitlab-oidc.ps1)
+#   SWA_DEPLOY_TOKEN   (masked)  -- terraform -chdir=infra/env output -raw frontend_deploy_token
+#   CORE_SERVICE_URL             -- terraform -chdir=infra/env output -raw core_service_url
 
 stages:
   - validate
+  - build
+  - deploy
 
-# uv image: has Python 3.12 + uv, nothing else. Each job syncs its own project.
 default:
   image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
   interruptible: true
 
 variables:
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
-  UV_NATIVE_TLS: "true"
 
 cache:
   key:
-    # GitLab allows at most 2 files here. agent_service/uv.lock is the one that
-    # matters most (torch etc.); the root lock covers the rest. core_service's
-    # deps are light -- a stale-key run just re-resolves them, cheaply.
     files:
       - uv.lock
       - agent_service/uv.lock
   paths:
     - .uv-cache
 
-# --------------------------------------------------------------------------- #
+# ========================= validate ========================================= #
 
-test:risk:
+.test:
   stage: validate
-  script:
-    - uv sync --group dev
-    - uv run pytest tests/ -q
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
+test:risk:
+  extends: .test
+  script:
+    - uv sync --group dev
+    - uv run pytest tests/ -q
+
 test:agent:
-  stage: validate
+  extends: .test
   script:
     - cd agent_service
     - uv sync --group dev
     - uv run pytest -q
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
 
 test:core:
-  stage: validate
+  extends: .test
   services:
-    - postgres:16   # reachable at host "postgres" (GitLab auto-aliases from the image name)
+    - postgres:16   # reachable at host "postgres"
   variables:
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: postgres
     POSTGRES_DB: risklens
     DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/risklens"
-    # conftest.py also needs these (core/config.py has required settings):
+    # conftest.py needs these too (core/config.py has required settings):
     JWT_SECRET: "ci-test-jwt-secret"
     INTERNAL_SERVICE_API_KEY: "ci-test-internal-key"
     ALPHA_VANTAGE_API_KEY: "ci-test-av-key"
@@ -68,6 +72,115 @@ test:core:
     - cd core_service
     - uv sync --group dev
     - uv run pytest -q
+
+# ========================= build (main only) ================================ #
+
+.build_image:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  cache: []
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "/certs/client"
+  id_tokens:
+    AZURE_ID_TOKEN:
+      aud: api://AzureADTokenExchange
+  before_script:
+    - apk add --no-cache azure-cli
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$AZURE_ID_TOKEN"
+    - az acr login -n acrrisklens
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build:core:
+  extends: .build_image
+  script:
+    - IMG=acrrisklens.azurecr.io/risklens-core-service
+    - docker build --platform linux/amd64 -t "$IMG:$CI_COMMIT_SHORT_SHA" -t "$IMG:latest" core_service
+    - docker push "$IMG:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG:latest"
+
+build:agent:
+  extends: .build_image
+  timeout: 45m
+  script:
+    - IMG=acrrisklens.azurecr.io/risklens-agent-service
+    - docker build --platform linux/amd64 -t "$IMG:$CI_COMMIT_SHORT_SHA" -t "$IMG:latest" agent_service
+    - docker push "$IMG:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG:latest"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - agent_service/**/*
+
+build:frontend:
+  stage: build
+  image: node:20-slim
+  cache: []
+  variables:
+    VITE_API_BASE_URL: "$CORE_SERVICE_URL"
+  script:
+    - '[ -n "$VITE_API_BASE_URL" ] || { echo "Set the CORE_SERVICE_URL CI variable"; exit 1; }'
+    - cd frontend
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - frontend/dist
+    expire_in: 1 day
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - frontend/**/*
+
+# ========================= deploy (main only) ============================== #
+
+.deploy:
+  stage: deploy
+  image: mcr.microsoft.com/azure-cli:latest
+  interruptible: false
+  cache: []
+  id_tokens:
+    AZURE_ID_TOKEN:
+      aud: api://AzureADTokenExchange
+  before_script:
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$AZURE_ID_TOKEN"
+  environment:
+    name: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy:core:
+  extends: .deploy
+  needs: ["build:core"]
+  script:
+    - az containerapp update -g rg-risklens -n core-service --image "acrrisklens.azurecr.io/risklens-core-service:$CI_COMMIT_SHORT_SHA"
+
+deploy:agent:
+  extends: .deploy
+  needs: ["build:agent"]
+  script:
+    - az containerapp update -g rg-risklens -n agent-service --image "acrrisklens.azurecr.io/risklens-agent-service:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - agent_service/**/*
+
+deploy:frontend:
+  stage: deploy
+  image: node:20-slim
+  interruptible: false
+  cache: []
+  needs: ["build:frontend"]
+  script:
+    - npx --yes @azure/static-web-apps-cli deploy ./frontend/dist --deployment-token "$SWA_DEPLOY_TOKEN" --env production
+  environment:
+    name: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - frontend/**/*
