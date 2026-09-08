@@ -35,6 +35,10 @@ build-backend = "uv_build"
 [tool.uv]
 native-tls = true
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
