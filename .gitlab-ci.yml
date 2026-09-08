@@ -90,9 +90,29 @@ test:core:
     AZURE_ID_TOKEN:
       aud: api://AzureADTokenExchange
   before_script:
-    - apk add --no-cache azure-cli
-    - az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$AZURE_ID_TOKEN"
-    - az acr login -n acrrisklens
+    # azure-cli was pulled from Alpine's repos, so do the OIDC -> ACR token
+    # exchange by hand (this is exactly what `az acr login` does internally):
+    #   1. GitLab OIDC JWT           -> Azure AD access token (ARM audience)
+    #   2. Azure AD access token     -> ACR refresh token via /oauth2/exchange
+    #   3. docker login with the ACR refresh token (username is the all-zero GUID)
+    - apk add --no-cache curl jq
+    - |
+      AAD_TOKEN=$(curl -sf -X POST \
+        "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
+        -d "client_id=${AZURE_CLIENT_ID}" \
+        -d "scope=https://management.azure.com/.default" \
+        -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+        -d "client_assertion=${AZURE_ID_TOKEN}" \
+        -d "grant_type=client_credentials" | jq -r .access_token)
+      [ -n "$AAD_TOKEN" ] && [ "$AAD_TOKEN" != "null" ] || { echo "Azure AD token exchange failed"; exit 1; }
+    - |
+      ACR_TOKEN=$(curl -sf -X POST \
+        "https://acrrisklens.azurecr.io/oauth2/exchange" \
+        -d "grant_type=access_token" \
+        -d "service=acrrisklens.azurecr.io" \
+        -d "access_token=${AAD_TOKEN}" | jq -r .refresh_token)
+      [ -n "$ACR_TOKEN" ] && [ "$ACR_TOKEN" != "null" ] || { echo "ACR token exchange failed"; exit 1; }
+    - echo "$ACR_TOKEN" | docker login acrrisklens.azurecr.io -u 00000000-0000-0000-0000-000000000000 --password-stdin
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
