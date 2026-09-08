@@ -62,17 +62,22 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def register_and_login(client: TestClient, email: str, name: str = "User", password: str = "password123") -> str:
-    """Register a user and return their access token."""
-    client.post("/auth/register", json={"name": name, "email": email, "password": password})
-    resp = client.post("/auth/login", json={"email": email, "password": password})
-    assert resp.status_code == 200, resp.text
-    return resp.json()["access_token"]
+@pytest.fixture
+def register_and_login(client):
+    """Returns a helper: register_and_login(email, name=..., password=...) -> access token."""
+
+    def _do(email: str, name: str = "User", password: str = "password123") -> str:
+        client.post("/auth/register", json={"name": name, "email": email, "password": password})
+        resp = client.post("/auth/login", json={"email": email, "password": password})
+        assert resp.status_code == 200, resp.text
+        return resp.json()["access_token"]
+
+    return _do
 
 
 @pytest.fixture
-def auth_client(client):
+def auth_client(client, register_and_login):
     """`client` with a registered, logged-in user's Bearer token set."""
-    token = register_and_login(client, "primary@example.com", name="Primary")
+    token = register_and_login("primary@example.com", name="Primary")
     client.headers["Authorization"] = f"Bearer {token}"
     return client
