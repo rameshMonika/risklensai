@@ -6,6 +6,10 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
+# Frontend build output
+frontend/dist/
+node_modules/
+
 # Terraform
 **/.terraform/
 *.tfstate
