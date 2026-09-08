@@ -54,8 +54,7 @@ test:agent:
 test:core:
   stage: validate
   services:
-    - name: postgres:16
-      alias: postgres
+    - postgres:16   # reachable at host "postgres" (GitLab auto-aliases from the image name)
   variables:
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: postgres

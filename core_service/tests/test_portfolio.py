@@ -1,7 +1,5 @@
 """Portfolio / holdings CRUD + per-user ownership isolation."""
 
-from tests.conftest import register_and_login
-
 
 def test_create_holding_uppercases_the_symbol(auth_client):
     resp = auth_client.post(
@@ -65,16 +63,16 @@ def test_holdings_endpoints_require_auth(client):
     ).status_code == 401
 
 
-def test_a_user_cannot_touch_another_users_holding(client):
+def test_a_user_cannot_touch_another_users_holding(client, register_and_login):
     # user A creates a holding
-    token_a = register_and_login(client, "owner@example.com", name="Owner")
+    token_a = register_and_login("owner@example.com", name="Owner")
     client.headers["Authorization"] = f"Bearer {token_a}"
     hid = client.post(
         "/portfolio/holdings", json={"symbol": "AAPL", "quantity": 10, "avg_cost": 180.0}
     ).json()["id"]
 
     # user B must not see it, edit it, or delete it
-    token_b = register_and_login(client, "intruder@example.com", name="Intruder")
+    token_b = register_and_login("intruder@example.com", name="Intruder")
     client.headers["Authorization"] = f"Bearer {token_b}"
 
     assert client.get("/portfolio/holdings").json() == []          # B's own list is empty
