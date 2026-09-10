@@ -74,22 +74,22 @@ The core design bet: **the LLM decides *which* deterministic function to call an
 
 Two backend services the team owns, plus Postgres, plus three MCP tool subprocesses inside the agent, plus three third-party APIs (Alpha Vantage, Tavily, the LLM provider). **The frontend only ever talks to core-service.** The agent service is never reachable from the browser and never touches the database — it receives a holdings snapshot in the request body and returns a result.
 
-```
-React (Vite / Static Web Apps)
-   │  REST + Bearer JWT
-   ▼
-core-service  ──────────────►  PostgreSQL 16   (auth, portfolios, investigations, evidence, reports)
-   │  POST /internal/investigate
-   │  { portfolio_id, question, holdings }  +  INTERNAL_SERVICE_API_KEY header
-   ▼
-agent-service  (stateless, no DB)
-   │  LangGraph: guardrail → router → agents → answer | report
-   ├─ Market MCP   ─►  Alpha Vantage
-   ├─ Risk MCP     ─►  deterministic Python (no network)
-   └─ News MCP     ─►  Tavily
-   │  returns: intent, trajectory, answer, risk_results, evidence, trace_id
-   ▼
-core-service  persists INVESTIGATION / EVIDENCE / INVESTIGATION_REPORT, returns the result to React
+*Diagram 1 — service topology.*
+
+```mermaid
+flowchart TB
+  user(["User / browser"])
+  fe["frontend<br/>React + Vite · Static Web App"]
+  core["core-service · FastAPI :8000<br/>the only public API<br/>auth · portfolio CRUD · orchestration · persistence"]
+  agent["agent-service · FastAPI + LangGraph :8100<br/>stateless investigation worker · no database"]
+  db[("PostgreSQL 16")]
+  ext[("External providers<br/>Alpha Vantage · Tavily · LLM · LangSmith")]
+
+  user -->|"HTTPS"| fe
+  fe -->|"REST + Bearer JWT"| core
+  core <-->|"SQL"| db
+  core <-->|"/internal/investigate + shared secret"| agent
+  agent -->|"market · news · LLM"| ext
 ```
 
 Request flow for an investigation: `React → core: POST /investigations {question}` → core authenticates the user, resolves their portfolio, loads holdings from Postgres → `core → agent: POST /internal/investigate {portfolio_id, question, holdings}` → agent runs the graph statelessly and returns the report → core persists the three investigation tables → core returns the result to React.
@@ -290,6 +290,45 @@ To point the agent at Azure AI Foundry instead of Groq, set `LLM_PROVIDER=azure`
 
 Infrastructure is Terraform, in [`infra/`](infra/) — one environment, one resource group (`rg-risklens`): Static Web App (frontend), two Container Apps (`core-service` public, `agent-service` internal-only) in a VNet, PostgreSQL Flexible Server (VNet-private), Azure AI Foundry `gpt-oss-120b`, Key Vault (per-app managed identity), Container Registry.
 
+*Diagram 4 — Azure topology. Solid arrows are request traffic, dashed are supporting wiring.*
+
+```mermaid
+flowchart TB
+  user(["End user"])
+  swa["Static Web App · risklens-frontend<br/>CDN + managed TLS · no container"]
+
+  subgraph RG["resource group · rg-risklens"]
+    direction TB
+    subgraph VNET["vnet-risklens · private"]
+      direction TB
+      subgraph CAE["Container Apps env · cae-risklens"]
+        direction TB
+        core["core-service<br/>ingress: external"]
+        agent["agent-service<br/>ingress: internal only<br/>1 vCPU / 2 GiB · min 1"]
+      end
+      pg[("PostgreSQL Flexible Server<br/>public access disabled")]
+    end
+
+    kv["Key Vault<br/>kv-risklens-rm7"]
+    acr[("Container Registry<br/>acrrisklens")]
+    foundry["Azure AI Foundry<br/>gpt-oss-120b"]
+  end
+
+  ext(["Alpha Vantage · Tavily · LangSmith"])
+
+  user -->|"HTTPS"| swa --> core
+  core -->|"shared secret"| agent
+  core --> pg
+  core --> ext
+  agent --> foundry
+  agent --> ext
+
+  kv -. "secrets · managed identity" .-> core
+  kv -. "secrets · managed identity" .-> agent
+  acr -. "image pull" .-> core
+  acr -. "image pull" .-> agent
+```
+
 Because Azure Container Apps validates the image at *create* time, build the registry first, push, then provision the rest:
 
 ```powershell
@@ -313,6 +352,26 @@ Then deploy the front end (`npm run build` with `VITE_API_BASE_URL` set to the `
 
 One `POST /internal/investigate` runs a compiled LangGraph `StateGraph`: `START → guardrail → (refused ? END : supervisor) → <plan step 1> → <plan step 2> → … → END`. The supervisor emits an ordered list of agent nodes; a conditional edge dispatches them one at a time by index, so the trajectory genuinely varies per route rather than being one fixed path with nodes toggled on and off.
 
+*Diagram 2 — the LangGraph graph inside agent-service.*
+
+```mermaid
+flowchart TB
+  req(["POST /internal/investigate"])
+  g["guardrail<br/>safety + relevance classification"]
+  refuse(["refusal · unsafe / off_topic"])
+  r["semantic router<br/>selects and orders the agent nodes"]
+  exec["run the plan · one agent node per step<br/>portfolio · market · risk · news"]
+  ans(["answer — plain quantitative reply"])
+  rep(["report — cited synthesis + limitations"])
+
+  req --> g
+  g -->|"blocked"| refuse
+  g -->|"allowed"| r
+  r --> exec
+  exec --> ans
+  exec --> rep
+```
+
 ### Guardrail, safety + relevance
 
 A single fast structured-output LLM call (`GuardrailVerdict { unsafe, off_topic, reason }`) runs **before** the router, in blocking mode. `unsafe` catches prompt-injection / instruction-override / "reveal your system prompt" attempts; `off_topic` catches genuine but unrelated questions (weather, jokes). Either one short-circuits the graph to `END` with its own refusal message — no agent executes. On a transient structured-output failure it **fails open** (proceeds to the router), matching the fallback-on-error pattern used for market data elsewhere.
@@ -323,7 +382,31 @@ This is the *only* place the pipeline refuses. The router downstream has no refu
 
 No LLM classifies the intent. At build time, `scripts/calibrate_router.py` pools ~13–21 labelled example questions per intent, embeds them with a local `HuggingFaceEncoder` (sentence-transformers, no API key), fits `KMeans(k = min(3, n))` per intent, and commits the resulting **15 centroids** (5 intents × ≤3) to `router_calibration.json`.
 
-At request time (`graph/router.py`): embed the question once, L2-normalise it, take the **max** cosine similarity against each intent's centroids (close to *one* sub-meaning of an intent is enough), and **argmax** over the 5 scores. No threshold, no "none of these" option. The 5 intents map to fixed ordered routes:
+At request time (`graph/router.py`): embed the question once, L2-normalise it, take the **max** cosine similarity against each intent's centroids (close to *one* sub-meaning of an intent is enough), and **argmax** over the 5 scores. No threshold, no "none of these" option.
+
+*Diagram 3 — the two phases of the router.*
+
+```mermaid
+flowchart TB
+  subgraph BUILD["build time · scripts/calibrate_router.py"]
+    direction LR
+    u["~13–21 labelled<br/>utterances per intent"] --> e1["MiniLM encoder<br/>384-d, local, no API"]
+    e1 --> km["KMeans<br/>k = min(3, n), seed 42"]
+    km --> cj[("router_calibration.json<br/>15 centroids, committed")]
+  end
+
+  subgraph REQ["request time · graph/router.py"]
+    direction LR
+    q["question"] --> e2["MiniLM encoder<br/>+ L2-normalise"]
+    e2 --> sim["cosine similarity vs each intent's<br/>≤3 centroids · keep the max"]
+    sim --> am["argmax over 5 scores<br/>no threshold"]
+    am --> rt["INTENT_ROUTES lookup<br/>→ ordered agent plan"]
+  end
+
+  cj -.->|"loaded on boot"| sim
+```
+
+The 5 intents map to fixed ordered routes:
 
 | Intent | Route |
 |---|---|
@@ -332,6 +415,24 @@ At request time (`graph/router.py`): embed the question once, L2-normalise it, t
 | `concentration` | `portfolio → market → risk → answer` |
 | `news_reason` | `market → news → report` |
 | `full_investigation` | `portfolio → market → risk → news → report` |
+
+*Diagram 3b — each intent to its route.*
+
+```mermaid
+flowchart LR
+  r(["router<br/>argmax over 5 intents"])
+  i1["holdings"]
+  i2["concentration"]
+  i3["symbol_risk"]
+  i4["news_reason"]
+  i5["full_investigation"]
+
+  r --> i1 --> o1["Portfolio → Answer"]
+  r --> i2 --> o2["Portfolio → Market → Risk → Answer"]
+  r --> i3 --> o3["Market → Risk → Answer"]
+  r --> i4 --> o4["Market → News → Report"]
+  r --> i5 --> o5["Portfolio → Market → Risk → News → Report"]
+```
 
 **Resolved bug (found during the V1 build):** the router originally had its own calibrated-threshold refusal path. Coordinate-ascent threshold search over a labelled set (including a `"None"` bucket of off-topic examples) reliably converged to all-zero thresholds — "None cases correctly refused: 0/10" — because it only ever tried candidate thresholds *equal to* an observed score, never a value strictly *between* two clusters, so it could never find the separating gap (real separation existed: genuine `symbol_risk` matches scored 0.599+ vs off-topic topping out at 0.266). The fix: remove router-level refusal entirely and fold it into the guardrail (`unsafe` / `off_topic`). The router became a plain unconditional argmax; calibration now only fits centroids, and calibration accuracy is measured as argmax-matches-label (100% on the calibration set).
 
@@ -426,3 +527,41 @@ Off unless `LANGSMITH_TRACING=true` and a key are set. When on, every investigat
 ### CI/CD (GitLab)
 
 `.gitlab-ci.yml` — `validate` (risk/agent/core test jobs, every push + MR), `build` (SHA-tagged images to ACR, `main` only), `deploy` (`az containerapp update` + `swa deploy`, `main` only). Azure auth is OIDC federation with no stored secret; the build jobs do the OIDC → Azure AD → ACR-refresh-token exchange by hand with `curl` + `jq`. Path rules keep `build:agent`/`deploy:agent` and the frontend jobs scoped to their own directories. `terraform apply` is **not** in CI — infrastructure changes stay manual.
+
+*Diagram 5 — the pipeline. `(*)` marks a job that runs only when its own directory changed.*
+
+```mermaid
+flowchart LR
+  push(["push / merge request"])
+
+  subgraph V["validate · every push and MR"]
+    direction TB
+    tr["test:risk"]
+    ta["test:agent"]
+    tc["test:core (+ postgres:16)"]
+  end
+
+  subgraph B["build · main only"]
+    direction TB
+    bc["build:core"]
+    ba["build:agent (*)"]
+    bf["build:frontend (*)"]
+  end
+
+  subgraph D["deploy · main only · production"]
+    direction TB
+    dc["deploy:core"]
+    da["deploy:agent (*)"]
+    df["deploy:frontend (*)"]
+  end
+
+  acr[("ACR · acrrisklens<br/>image :SHORT_SHA + :latest")]
+  target(["Azure · rg-risklens<br/>Container Apps + Static Web App"])
+  oidc{{"GitLab OIDC → Azure AD<br/>federated · no stored secret"}}
+
+  push --> V --> B --> D --> target
+  B -->|"docker push"| acr
+  acr -->|"pulled at deploy"| D
+  oidc -. "authenticates" .-> B
+  oidc -. "authenticates" .-> D
+```
